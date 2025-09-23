@@ -119,7 +119,7 @@ def run():
         return
 
     driver = get_driver()
-    driver.get("https://www.amazon.com.tr")
+    driver.get(URL)
     time.sleep(2)
     load_cookies(driver)
     driver.get(URL)
