@@ -59,32 +59,39 @@ def get_driver():
 def get_price_from_detail(driver, url):
     try:
         driver.get(url)
-
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-        )
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
         time.sleep(2)
 
-        try:
-            variant_input = driver.find_element(By.CSS_SELECTOR, "input.a-button-input[aria-checked='true']")
-            driver.execute_script("arguments[0].click();", variant_input)
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".aok-offscreen"))
-            )
-            time.sleep(1)
-        except:
-            pass
-
+        # Normal ürün sayfasında fiyat araması
         price_elements = driver.find_elements(By.CSS_SELECTOR, ".aok-offscreen")
         for el in price_elements:
             text = el.get_attribute("innerText").strip()
             if "TL" in text and any(char.isdigit() for char in text):
                 return text
 
+        # Eğer fiyat bulunamadıysa → satın alma seçenekleri sayfasına git
+        try:
+            offer_link = driver.find_element(By.CSS_SELECTOR, "a.a-button-text[title*='Satın Alma Seçeneklerini Gör']")
+            offer_url = offer_link.get_attribute("href")
+            if offer_url:
+                if offer_url.startswith("/"):
+                    offer_url = "https://www.amazon.com.tr" + offer_url
+                driver.get(offer_url)
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".aok-offscreen")))
+                time.sleep(1)
+                offer_prices = driver.find_elements(By.CSS_SELECTOR, ".aok-offscreen")
+                for el in offer_prices:
+                    text = el.get_attribute("innerText").strip()
+                    if "TL" in text and any(char.isdigit() for char in text):
+                        return text
+        except Exception as e:
+            print(f"⚠️ Satın alma seçenekleri sayfası hatası: {e}")
+
         return "Fiyat alınamadı"
     except Exception as e:
         print(f"⚠️ Detay sayfasından fiyat alınamadı: {e}")
         return "Fiyat alınamadı"
+
 
 def load_sent_data():
     data = {}
