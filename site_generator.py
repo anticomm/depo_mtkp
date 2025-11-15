@@ -23,7 +23,9 @@ os.makedirs(HTML_DIR, exist_ok=True)
 token = os.getenv("GH_TOKEN")
 repo_url = f"https://{token}@github.com/anticomm/{REPO_NAME}.git"
 
-def generate_html(product, template=TEMPLATE):
+def generate_html(product, template=None):
+    if template is None:
+        template = TEMPLATE
     if not template:
         return "", product.get("asin", "urun")
 
