@@ -60,8 +60,7 @@ jobs:
           git commit -m "Scraper C → Fiyat güncellemesi" || echo "⏩ Değişiklik yok"
           git pull origin master --rebase || echo "⏩ Pull başarısız, devam ediliyor"
           git push || echo "⏩ Push başarısız ama zincir devam ediyor" 
-      - name: 30 saniye bekle
-        run: sleep 30
+      
 
       - name: Scraper A'yı tetikle
         run: |
