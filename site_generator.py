@@ -16,9 +16,12 @@ def load_template():
         print("❌ template.html dosyası bulunamadı.")
         return ""
 
-TEMPLATE = load_template()
-HTML_DIR = os.path.join("urunlerim", "Giyim")
+REPO_NAME = os.getenv("REPO_NAME", "urunlerim")  # default urunlerim
+HTML_DIR = os.path.join(REPO_NAME, "Giyim")
 os.makedirs(HTML_DIR, exist_ok=True)
+
+token = os.getenv("GH_TOKEN")
+repo_url = f"https://{token}@github.com/anticomm/{REPO_NAME}.git"
 
 def generate_html(product, template=TEMPLATE):
     if not template:
