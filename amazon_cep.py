@@ -5,6 +5,7 @@ import json
 import time
 import base64
 import re
+import site_generator as site
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -13,11 +14,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from telegram_cep import send_message
-from capture import run_capture
-URL = "https://www.amazon.com.tr/s?k=matkap&i=diy&srs=44219324031&bbn=44219324031&rh=n%3A12707534031%2Cp_98%3A21345978031&s=price-asc-rank&dc&ds=v1%3AtTA55GnMJoamU4QYNTi5pf9KJGTUYp3TofH%2BMQ5fN%2BM&__mk_tr_TR=%C3%85M%C3%85%C5%BD%C3%95%C3%91"
+from site_generator import generate_site, load_template
+from urllib.parse import urljoin
+from selenium.common.exceptions import NoSuchElementException
+
+URL = "https://www.amazon.com.tr/s?k=puma+erkek+ayakkab%C4%B1&rh=p_n_g-1004152217091%3A13681700031%257C13681701031%257C13681702031%257C13681703031%257C13681704031%257C13681705031%257C13681706031%2Cp_n_g-101015233022111%3A96332027031%2Cp_98%3A21345978031&s=price-asc-rank&dc&crid=1S5PGUH7CDYDI&qid=1763207178&rnid=21345970031&sprefix=%2Caps%2C159&ref=sr_st_price-asc-rank&ds=v1%3AHi6vItQ7gBe6wY8hdroQQ8Yk5MiTvFSQsY37MYV5Wuw"
 COOKIE_FILE = "cookie_cep.json"
 SENT_FILE = "send_products.txt"
-
+TEMPLATE = load_template()
 def decode_cookie_from_env():
     cookie_b64 = os.getenv("COOKIE_B64")
     if not cookie_b64:
@@ -81,26 +85,12 @@ def scroll_page(driver, pause=1.5, steps=5):
     for _ in range(steps):
         driver.execute_script("window.scrollBy(0, 1000);")
         time.sleep(pause)
-def get_used_price_from_item(item):
-    try:
-        container = item.find_element(
-            By.XPATH,
-            ".//span[contains(text(), 'Diğer satın alma seçenekleri')]/following::span[contains(text(), 'TL')][1]"
-        )
-        price = container.text.strip()
-        return price
-    except:
-        return None
 
-def get_used_price_from_detail(driver):
+def get_regular_price_from_item(item):
     try:
-        container = driver.find_element(
-            By.XPATH,
-            "//div[contains(@class, 'a-column') and .//span[contains(text(), 'İkinci El Ürün Satın Al:')]]"
-        )
-        price_element = container.find_element(By.CLASS_NAME, "offer-price")
-        price = price_element.text.strip()
-        return price
+        whole = item.find_element(By.CSS_SELECTOR, "span.a-price-whole").text.strip()
+        fraction = item.find_element(By.CSS_SELECTOR, "span.a-price-fraction").text.strip()
+        return f"{whole},{fraction} TL"
     except:
         return None
 
@@ -146,6 +136,8 @@ def run():
     if not decode_cookie_from_env():
         return
 
+    all_products_to_process = []
+    products = []
     driver = get_driver()
     check_timeout()
 
@@ -154,57 +146,80 @@ def run():
     load_cookies(driver)
     check_timeout()
     driver.get(URL)
-    try:
-        WebDriverWait(driver, 35).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-component-type='s-search-result']"))
-        )
-    except:
-        print("⚠️ Sayfa yüklenemedi.")
-        driver.quit()
-        return
-    scroll_page(driver)
-    driver.execute_script("""
-      document.querySelectorAll("h5.a-carousel-heading").forEach(h => {
-        let box = h.closest("div");
-        if (box) box.remove();
-      });
-    """)
 
-    items = driver.find_elements(By.CSS_SELECTOR, "div[data-component-type='s-search-result']")
-    print(f"🔍 {len(items)} ürün bulundu.")
-    products = []
-    for item in items:
-        check_timeout()
+    MAX_PAGES = 7
+    current_page = 1
+
+    while current_page <= MAX_PAGES:
+        print(f"📄 Sayfa {current_page} taranıyor...")
+
         try:
-            if item.find_elements(By.XPATH, ".//span[contains(text(), 'Sponsorlu')]"):
+            WebDriverWait(driver, 35).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-component-type='s-search-result']"))
+            )
+        except:
+            print("⚠️ Sayfa yüklenemedi.")
+            break
+
+        scroll_page(driver)
+        driver.execute_script("""
+          document.querySelectorAll("h5.a-carousel-heading").forEach(h => {
+            let box = h.closest("div");
+            if (box) box.remove();
+          });
+        """)
+
+        items = driver.find_elements(By.CSS_SELECTOR, "div[data-component-type='s-search-result']")
+        print(f"🔍 {len(items)} ürün bulundu.")
+
+        for item in items:
+            check_timeout()
+            try:
+                if item.find_elements(By.XPATH, ".//span[contains(text(), 'Sponsorlu')]"):
+                    continue
+
+                asin = item.get_attribute("data-asin")
+                if not asin:
+                    continue
+
+                title = item.find_element(By.CSS_SELECTOR, "img.s-image").get_attribute("alt").strip()
+                link = item.find_element(By.CSS_SELECTOR, "a.a-link-normal").get_attribute("href")
+                image = item.find_element(By.CSS_SELECTOR, "img.s-image").get_attribute("src")
+
+                price = get_regular_price_from_item(item)
+                if not price:
+                    continue
+
+                products.append({
+                    "asin": asin,
+                    "title": title,
+                    "link": link,
+                    "image": image,
+                    "price": price
+                })
+
+            except Exception as e:
+                print(f"⚠️ Ürün parse hatası: {e}")
                 continue
 
-            asin = item.get_attribute("data-asin")
-            if not asin:
-                continue
+        # Sayfa geçişi
+        try:
+            next_button = driver.find_element(By.CSS_SELECTOR, "a.s-pagination-next")
+            next_link = next_button.get_attribute("href")
+            if not next_link:
+                print("⏹️ Son sayfaya ulaşıldı, pagination tamamlandı.")
+                break
+            full_next_url = urljoin("https://www.amazon.com.tr", next_link)
+            driver.get(full_next_url)
+            current_page += 1
+            check_timeout()
+        except NoSuchElementException:
+            print("⏹️ Son sayfaya ulaşıldı, pagination tamamlandı.")
+            break
+        except Exception:
+            print("⚠️ Sayfa geçiş hatası, zincir devam ediyor.")
+            break
 
-            title = item.find_element(By.CSS_SELECTOR, "img.s-image").get_attribute("alt").strip()
-            link = item.find_element(By.CSS_SELECTOR, "a.a-link-normal").get_attribute("href")
-            image = item.find_element(By.CSS_SELECTOR, "img.s-image").get_attribute("src")
-
-            price = get_used_price_from_item(item)
-            if not price:
-                price = get_final_price(driver, link)
-
-            if not price:
-                continue
-
-            products.append({
-                "asin": asin,
-                "title": title,
-                "link": link,
-                "image": image,
-                "price": price
-            })
-
-        except Exception as e:
-            print(f"⚠️ Ürün parse hatası: {e}")
-            continue
 
     driver.quit()
     print(f"✅ {len(products)} ürün başarıyla alındı.")
@@ -212,9 +227,12 @@ def run():
     sent_data = load_sent_data()
     products_to_send = []
 
+    # Bu noktadan itibaren senin mevcut zincir mantığın aynen devam edebilir
+
     for product in products:
         asin = product["asin"]
         price = product["price"].strip()
+        all_products_to_process.append(product)
 
         if asin in sent_data:
             old_price = sent_data[asin]
@@ -227,28 +245,34 @@ def run():
                 continue
 
             if new_val < old_val:
-                print(f"📉 Fiyat düştü: {product['title']} → {old_price} → {price}")
-                product["old_price"] = old_price
-                products_to_send.append(product)
+                diff = (old_val - new_val) / old_val
+                if diff >= 0.19:
+                    print(f"📉 %19+ düşüş: {product['title']} → {old_price} → {price}")
+                    product["old_price"] = old_price
+                    products_to_send.append(product)
             else:
-                print(f"⏩ Fiyat yükseldi veya aynı: {product['title']} → {old_price} → {price}")
-            sent_data[asin] = price
+                sent_data[asin] = price
 
         else:
             print(f"🆕 Yeni ürün: {product['title']}")
-            products_to_send.append(product)
             sent_data[asin] = price
 
-    if products_to_send:
-        for p in products_to_send:
-            send_message(p)
-            run_capture(p)
+    if all_products_to_process:
+        site.generate_site(all_products_to_process, TEMPLATE, products_to_send)
+        print(f"📁 HTML üretildi: {len(all_products_to_process)} ürün işlendi.")
+    
+        if products_to_send:
+            print(f"📲 Mesaj gönderildi: {len(products_to_send)} ürün bildirildi.")
+        else:
+            print("⚠️ Bildirilecek indirimli ürün yok.")
+
         save_sent_data(sent_data)
-        print(f"📁 Dosya güncellendi: {len(products_to_send)} ürün eklendi/güncellendi.")
     else:
-        print("⚠️ Yeni veya indirimli ürün bulunamadı.")
+        print("⚠️ Yeni veya işlenecek ürün bulunamadı.")
+    print("🚀 Zincir başlatıldı")
 
 if __name__ == "__main__":
+    print("🚀 Zincir başlatıldı")
     try:
         run()
     except TimeoutError as e:
