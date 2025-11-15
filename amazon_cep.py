@@ -18,7 +18,7 @@ from site_generator import generate_site, load_template
 from urllib.parse import urljoin
 from selenium.common.exceptions import NoSuchElementException
 
-URL = "https://www.amazon.com.tr/s?k=puma+erkek+ayakkab%C4%B1&rh=p_n_g-1004152217091%3A13681700031%257C13681701031%257C13681702031%257C13681703031%257C13681704031%257C13681705031%257C13681706031%2Cp_n_g-101015233022111%3A96332027031%2Cp_98%3A21345978031&s=price-asc-rank&dc&crid=1S5PGUH7CDYDI&qid=1763207178&rnid=21345970031&sprefix=%2Caps%2C159&ref=sr_st_price-asc-rank&ds=v1%3AHi6vItQ7gBe6wY8hdroQQ8Yk5MiTvFSQsY37MYV5Wuw"
+URL = "https://www.amazon.com.tr/s?k=new+balance+ayakkab%C4%B1&rh=p_n_g-101015233022111%3A96332027031%2Cp_123%3A197955&dc&crid=298JHSPLJVLX0&qid=1763211681&rnid=91049075031&sprefix=%2Caps%2C115&ref=sr_nr_p_123_1&ds=v1%3AzzLjj%2FWpGygiS5ONGKJV4DCciXNsPLmXEMwtmnjJ%2F0U"
 COOKIE_FILE = "cookie_cep.json"
 SENT_FILE = "send_products.txt"
 TEMPLATE = load_template()
