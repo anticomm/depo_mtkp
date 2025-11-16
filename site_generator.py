@@ -143,7 +143,10 @@ def generate_site(products, template, products_to_notify):
 
     token = os.getenv("GH_TOKEN")
     repo_url = f"https://{token}@github.com/anticomm/urunlerim.git"
-
+    
+    if not os.path.exists("urunlerim"):
+        subprocess.run(["git", "clone", repo_url, "urunlerim"], check=True)
+   
     try:
         subprocess.run(["git", "pull", "--ff-only"], cwd="urunlerim", check=True)
     except subprocess.CalledProcessError as e:
