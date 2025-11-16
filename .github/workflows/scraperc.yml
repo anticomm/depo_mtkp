@@ -21,6 +21,8 @@ jobs:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       CSE_ID: ${{ secrets.CSE_ID }}
       COOKIE2_B64: ${{ secrets.COOKIE2_B64 }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
     steps:
       - name: Repo'yu klonla
         uses: actions/checkout@v3
