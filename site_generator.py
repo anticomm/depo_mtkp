@@ -1,152 +1,159 @@
+
 import os
-import requests
-import json
-import re
+import subprocess
+import threading
+from telegram_cep import send_message
+from concurrent.futures import ThreadPoolExecutor
 
-def extract_clean_price(text):
-    if not text:
+def shorten_url(url):
+    return url  # t.ly API entegresi buraya eklenebilir
+
+def load_template():
+    try:
+        with open("template.html", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        print("❌ template.html dosyası bulunamadı.")
         return ""
-    match = re.search(r"(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*TL", text)
-    return match.group(1) + " TL" if match else ""
 
-def format_product_message(product):
-    title = product.get("title", "🛍️ Ürün adı bulunamadı")
-    price = extract_clean_price(product.get("price", ""))
-    old_price = extract_clean_price(product.get("old_price", ""))
-    asin = product.get("asin")
-    if asin:
-        link = f"https://indirimsinyali.com/Giyim/{asin}.html"
-    else:
-        link = product.get("link", "#")
-    discount = product.get("discount", "")
+TEMPLATE = load_template()
+HTML_DIR = os.path.join("urunlerim", "Giyim")
+os.makedirs(HTML_DIR, exist_ok=True)
+
+def generate_html(product, template=TEMPLATE):
+    if not template:
+        return "", product.get("asin", "urun")
+
+    slug = product.get("slug") or product.get("asin") or "urun"
+    title = product.get("title", "Ürün")
+    price = product.get("price", "")
+    old_price = product.get("old_price", "")
     rating = product.get("rating", "")
-    colors = product.get("colors", [])
     specs = product.get("specs", [])
+    image = product.get("image", "")
+    asin = product.get("asin", "")
+    link = shorten_url(product.get("amazon_link")) or f"https://www.amazon.com.tr/dp/{asin}"
+    date = product.get("date", "2025-10-24")
 
-    if "TL" not in price:
-        price = f"{price} TL"
-    if old_price and "TL" not in old_price:
-        old_price = f"{old_price} TL"
-
-    indirimbilgi = f"%{discount}" if discount and discount.isdigit() else ""
-    stars = f"⭐ {rating}" if rating else ""
-    renkler = ", ".join([c["color"] for c in colors]) if colors else ""
-    teknik = "\n".join([f"▫️ {spec}" for spec in specs]) if specs else ""
-
-    if old_price and old_price != price:
-        fiyat_bilgisi = (
-            f"🔻 *Eski fiyat:* *{old_price}*\n"
-            f"💰 *Yeni fiyat:* *{price}*"
-        )
-    else:
-        fiyat_bilgisi = f"💰 *{price}*"
-
-    return (
-        f"*{title}*\n"
-        f"{indirimbilgi}  {stars}\n"
-        f"{teknik}\n"
-        f"{f'🎨 Renkler: {renkler}' if renkler else ''}\n"
-        f"{fiyat_bilgisi}\n"
+    specs_html = "".join([f"<li>{spec}</li>" for spec in specs])
+    fiyat_html = (
+        f"<p><del>{old_price}</del> → <strong>{price}</strong></p>"
+        if old_price and old_price != price
+        else f"<p><strong>{price}</strong></p>"
     )
 
+    html = template.format(
+        title=title,
+        image=image,
+        price_html=fiyat_html,
+        specs_html=specs_html,
+        rating=rating,
+        link=link,
+        asin=slug,
+        date=date
+    )
+    return html, slug
 
-def send_message(product):
-    token = os.getenv("BOT_TOKEN")
-    chat_id = os.getenv("CHAT_ID")
-    base_url = f"https://api.telegram.org/bot{token}"
+def process_product(product, template, notify=False):
+    html, slug = generate_html(product, template)
+    if not html.strip():
+        print(f"❌ HTML boş: {slug}")
+        return None
 
-    if not token or not chat_id:
-        print("❌ BOT_TOKEN veya CHAT_ID tanımlı değil.")
-        return
+    filename = f"{slug}.html"
+    path = os.path.join(HTML_DIR, filename)
 
-    message = format_product_message(product)
-    image_url = product.get("image")
-    asin = product.get("asin")
-    real_link = f"https://indirimsinyali.com/Giyim/{asin}.html" if asin else product.get("link", "#")
-    link = real_link
-    
+    # ✅ Eğer dosya zaten varsa ve içerik aynıysa → yazma
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            existing = f.read()
+        if existing.strip() == html.strip(): 
+            return None
+
+    # ✅ Yeni veya değişmişse → yaz
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"✅ Ürün sayfası oluşturuldu: {path}")
+
+    if notify:
+        threading.Thread(target=send_message, args=(product,), daemon=True).start()
+
+    return slug
+
+def update_category_page():
+    html_files = [f for f in os.listdir(HTML_DIR) if f.endswith(".html") and f != "index.html"]
+    liste = ""
+    for dosya in sorted(html_files):
+        slug = dosya.replace(".html", "")
+        liste += f'<li><a href="{dosya}">{slug.replace("-", " ").title()}</a></li>\n'
+
+    html = f"""<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Giyim Ürünler</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="navbar">
+<ul>
+<li><a href="/">Anasayfa</a></li>
+<li><a href="index.html">Giyim</a></li>
+</ul>
+</div>
+<div class="container">
+<h1>📦 Giyim Ürünler</h1>
+<ul>{liste}</ul>
+</div>
+</body>
+</html>"""
+
+    index_path = os.path.join(HTML_DIR, "index.html")
+    with open(index_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print("✅ Giyim kategori sayfası güncellendi.")
+
+    subprocess.run(["git", "add", os.path.join("Giyim", "index.html")], cwd="urunlerim", check=True)
+    has_changes = subprocess.call(["git", "diff", "--cached", "--quiet"], cwd="urunlerim") != 0
+    if has_changes:
+        subprocess.run(["git", "commit", "-m", "Kategori sayfası güncellendi"], cwd="urunlerim", check=True)
+
+def generate_site(products, template, products_to_notify):
+    subprocess.run(["git", "config", "--global", "user.name", "github-actions"], check=True)
+    subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"], check=True)
+
+    slugs = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = []
+        for product in products:
+            notify = product in products_to_notify
+            futures.append(executor.submit(process_product, product, template, notify))
+        slugs = [f.result() for f in futures if f.result()]
+        total = len(products)
+        updated = len(slugs)
+        skipped = total - updated
+
+        print(f"📦 Toplam ürün: {total}")
+        if updated > 0:
+            print(f"✅ {updated} ürün güncellendi veya eklendi.")
+        if skipped > 0:
+            print(f"⏩ {skipped} ürün değişmedi, HTML yazılmadı.")
+    update_category_page()
+
+    token = os.getenv("GH_TOKEN")
+    repo_url = f"https://{token}@github.com/anticomm/urunlerim.git"
+
     try:
-        reply_markup = json.dumps({
-            "inline_keyboard": [[
-                {"text": "🛍️AÇ", "url": link}
-            ]]
-        })
+        subprocess.run(["git", "pull", "--ff-only"], cwd="urunlerim", check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ Pull hatası ama zincir devam ediyor: {e}")
 
-        if image_url and image_url.startswith("http"):
-            payload = {
-                "chat_id": chat_id,
-                "photo": image_url,
-                "caption": message,
-                "parse_mode": "Markdown",
-                "reply_markup": reply_markup
-            }
-            response = requests.post(f"{base_url}/sendPhoto", data=payload)
-        else:
-            payload = {
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "Markdown",
-                "reply_markup": reply_markup
-            }
-            response = requests.post(f"{base_url}/sendMessage", data=payload)
-
-        if response.status_code == 200:
-            print(f"✅ Gönderildi: {product.get('title', 'Ürün')}")
-        else:
-            print(f"❌ Gönderim hatası: {product.get('title', 'Ürün')} → {response.status_code} {response.text}")
-    except Exception as e:
-        print(f"❌ Telegram gönderim hatası: {e}")
-
-# 👇 Epey ekran görüntüsü gönderimi
-def send_epey_image(product, image_path):
-    token = os.getenv("BOT_TOKEN")
-    chat_id = os.getenv("CHAT_ID")
-    base_url = f"https://api.telegram.org/bot{token}"
-
-    if not token or not chat_id:
-        print("❌ BOT_TOKEN veya CHAT_ID tanımlı değil.")
-        return
-
-    title = product.get("title", "📷 Epey Görseli")
-    caption = f"*{title}*\n📊 Epey karşılaştırması"
-    try:
-        with open(image_path, "rb") as img:
-            files = {"photo": img}
-            payload = {
-                "chat_id": chat_id,
-                "caption": caption,
-                "parse_mode": "Markdown"
-            }
-            response = requests.post(f"{base_url}/sendPhoto", data=payload, files=files)
-        if response.status_code == 200:
-            print(f"✅ Epey görseli gönderildi: {title}")
-        else:
-            print(f"❌ Epey görsel gönderim hatası: {response.status_code} {response.text}")
-    except Exception as e:
-        print(f"❌ Epey görsel gönderim hatası: {e}")
-
-# 👇 Epey link fallback gönderimi
-def send_epey_link(product, url):
-    token = os.getenv("BOT_TOKEN")
-    chat_id = os.getenv("CHAT_ID")
-    base_url = f"https://api.telegram.org/bot{token}"
-
-    if not token or not chat_id:
-        print("❌ BOT_TOKEN veya CHAT_ID tanımlı değil.")
-        return
-
-    title = product.get("title", "🔗 Epey Linki")
-    message = f"*{title}*\n🔗 [Epey karşılaştırması]({url})"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        response = requests.post(f"{base_url}/sendMessage", data=payload)
-        if response.status_code == 200:
-            print(f"✅ Epey linki gönderildi: {title}")
-        else:
-            print(f"❌ Epey link gönderim hatası: {response.status_code} {response.text}")
-    except Exception as e:
-        print(f"❌ Epey link gönderim hatası: {e}")
+    subprocess.run(["git", "add", "."], cwd="urunlerim", check=True)
+    has_changes = subprocess.call(["git", "diff", "--cached", "--quiet"], cwd="urunlerim") != 0
+    if has_changes:
+        subprocess.run(["git", "commit", "-m", f"{len(slugs)} ürün eklendi/güncellendi"], cwd="urunlerim", check=True)
+        subprocess.run(["git", "push", repo_url], cwd="urunlerim", check=True)
+        print("🚀 Toplu repo push tamamlandı.")
+    else:
+        print("⚠️ Commit edilecek değişiklik yok.")
