@@ -153,7 +153,7 @@ def generate_site(products, template, products_to_notify):
     has_changes = subprocess.call(["git", "diff", "--cached", "--quiet"], cwd="urunlerim") != 0
     if has_changes:
         subprocess.run(["git", "commit", "-m", f"{len(slugs)} ürün eklendi/güncellendi"], cwd="urunlerim", check=True)
-        subprocess.run(["git", "push", repo_url], cwd="urunlerim", check=True)
+        subprocess.run(["git", "push", repo_url], check=True)
         print("🚀 Toplu repo push tamamlandı.")
     else:
         print("⚠️ Commit edilecek değişiklik yok.")
